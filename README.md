@@ -9,6 +9,8 @@
    - [API Configuration in API Gateway](#api-configuration-in-api-gateway)
    - [Batch Processing Databricks](#batch-processing-databricks)
    - [Automating Batch Processing with AWS MWAA](#automating-batch-processing-with-aws-mwaa)
+   - [Stream Processing AWS Kinesis](#stream-processing-aws-kinesis)
+   - [Stream Processing Databricks](#stream-processing-databricks)
 3. [Usage](#usage)
     - [Loading Data](#loading-data)
 4. [Contributing](#contributing)
@@ -207,18 +209,126 @@ Pinterest processes billions of data points every day to optimize the value deli
     - Navigate to the MWAA console and select your Environment. Once you're on the environment page select Edit. Under the DAG code in Amazon S3, update your Requirements file field by selecting the path corresponding to the requirements.txt file you have just uploaded to the S3 bucket.
 6. Create the Airflow DAG - refer to _dag.py file
 
-## Usage
+### Stream Processing AWS Kinesis
+1. Create three Kinesis Data Streams
+    - Navigate to the Kinesis console and select Create data stream, and create three streams with the following names:
+        - streaming-<your_UserId>-pin
+        - streaming-<your_UserId>-geo
+        - streaming-<your_UserId>-user
+    - Data stream capacity set to On-demand
+2. Configure an API with Kinesis Proxy Integration
+    - Create an IAM role for API access to Kinesis- attach AmazonKinesisFullAccessRole policy to your IAMrole and make not of the ARN. 
+    - Navigate to the API created in [API Configuration in API Gateway](#api-configuration-in-api-gateway)
+    - Under actions select Create Resource and create a resource called streams leave the rest as it and create resource
+    - Choose the created streams resource, from actions select create method and select GET from the dropdown list and click on the tick next to it.
+    - In the setup pannel you will need to select the following options:
+        -   Integration type: AWS Service
+        -   AWS Region: us-east-1
+        -   AWS Service: Kinesis
+        -   HTTP method: PoST
+        -   Action Type: User action name
+        -   Action type: List streams
+        -   Execution role: paste the ARN of the Kinesis role
+        -   Content Handling: Passthrough
+        -   Use Default Timeout: checked
+    - Once saved you will get to the GET-Method Execution page.
+    - Click on Integration Request
+        -  Expand the HTTP Header panel and select the following options:
+            -   Choose Add header button
+            -   Under Name type Content-Type
+            -   Under Mapped form type 'application/x-amz-json-1.1'
+            -   Press the Create tick button
+        - Expand the Mapping Templates panel and select the following options: 
+            -   Choose Add mapping template button
+            -   Under Content-Type type application/json
+            -   Press the Create tick button and choose Yes, secure this integration
+            -   Type {} in the template editor and choose the Save button to save the mapping template.
+    - Create, describe and delete streams in Kineses
+        - Under the streams resource create a new child resource with the Resource Path {stream-name}, and the Resource Name stream-name
+        - Creathe the following three methods for {stream-name} resource: GET, POST, DELETE
+            -GET Method 
+            - In the **Setup** panel you will need to select the following:,
+                - For **Integration type** select **AWS Service**
+                - For **AWS Region** choose us-east-1
+                - For **AWS Service** select **Kinesis**
+                - For **HTTP method** select `POST` 
+                - For **Action Type** select **User action name**
+                - For **Action** type `DescribeStream`
+                - For **Execution role** you should use the same ARN as in the previous step.
+            - Integration Request Panel: 
+                - Same steps as before but in the mappping template
+                    ```
+                    {
+                        "StreamName": "$input.params('stream-name')"
+                    }
+                    ```
+            - Post Method
+                - Same as the above but for the action type type CreateStream
+                - Mapping template:
+                    ```
+                    {
+                        "ShardCount": #if($input.path('$.ShardCount') == '') 5 #else $input.path('$.ShardCount') #end,
+                        "StreamName": "$input.params('stream-name')"
+                    }
+                    ```
+            - Delete Method
+                - Same as the above but for the action type type DeleteStream
+                - Mapping template:
+                    ```
+                    {
+                        "StreamName": "$input.params('stream-name')"
+                    }
+                    ```
+    - Add records to streams
+        - Under the {stream-name} resource create two child resources with the Resource Name record and records
+        - Create a PUT method in both resources
+            - Action type: PutRecord/PutRecords
+            - Mapping template (record):
+                ```
+                {
+                    "StreamName": "$input.params('stream-name')",
+                    "Data": "$util.base64Encode($input.body)",
+                    "PartitionKey": "$input.params('partition-key')"
+                }
+                ```
+            - Mapping template (records):
+                ```
+                {
+                    "StreamName": "$input.params('stream-name')",
+                    "Records": [
+                        #foreach($record in $input.path('$.Records'))
+                        {
+                            "Data": "$util.base64Encode($record.data)",
+                            "PartitionKey": "$record.partition-key"
+                        }#if($foreach.hasNext),#end
+                        #end
+                    ]
+                }
+                ```
 
-### Loading Data
+### Stream Processing Databricks 
+- Reading streaming data from Kinesis Data Streams refer to 
+
+
+## Usage
+### Batch Processing
+#### Extracting the Data
 1. Make sure to have set up everything up to [API Configuration in API Gateway](#api-configuration-in-api-gateway)
 2. Run the API Gateway 
 3. Run user_posting_emulation.py file
 
-### Transforming Data
+#### Loading and Transforming Data
 1. Make sure to have set up everything up to [Batch Processing Databricks](#batch-processing-databricks)
 2. The data was loaded and transformed using the Databricks notebook- refer to Data_Transformation notebook
 
-### Querying Data
+#### #Querying Data
 1. Refer to SQL Queries notebook
 
-## License
+### Stream Processing
+#### Extracting the Data
+1. Make sure to have set up everything up to [Stream Processing AWS Kinesis](#stream-processing-aws-kinesis)
+2. Run the API Gateway
+3. Run the user_posting_emulation_streaming.py file
+
+#### Loading and Transforming Data
+1.  Refer to Kinesis_Stream_Pin_Data notebook as reference
